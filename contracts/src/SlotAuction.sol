@@ -16,6 +16,8 @@ contract SlotAuction is Ownable {
       uint256 amount;
     }
 
+    bool public ended;
+
     uint40 public immutable BID_DURATION;
     uint8 public immutable SLOTS_AVAILABLE;
 
@@ -23,7 +25,6 @@ contract SlotAuction is Ownable {
 
     uint256 public lowestWinningBid;
     bool public started;
-    bool public ended;
     Bid[] public winningBids;
 
     mapping(address => Bid) public allBids;
@@ -90,20 +91,7 @@ contract SlotAuction is Ownable {
 
         uint256 refundableBal = 0;
 
-        // refund if not winner
-        if (userBid.amount < lowestWinningBid) {
-          refundableBal = userBid.amount;
-        } else {
-          uint256 len = winningBids.length;
-
-          // if winner, refund the difference between self and next lowest bid
-          for (uint256 i = 0; i < len; i++) {
-            if (winningBids[i].bidder == msg.sender) {
-              refundableBal = userBid.amount - winningBids[i + 1].amount;
-              break;
-            }
-          }
-        }
+        refundableBal = userBid.amount;
 
         payable(msg.sender).transfer(refundableBal);
         userBid.amount = 0;
@@ -111,14 +99,27 @@ contract SlotAuction is Ownable {
         emit Withdraw(msg.sender, refundableBal);
     }
 
-    function end() external {
+    function end() external onlyOwner {
         require(started, "not started");
-        require(block.timestamp >= endAt, "not ended");
-        require(!ended, "ended");
+        require(block.timestamp >= endAt, "Auction not ended");
 
         ended = true;
 
+        uint256 ownerWithdrawableBal;
+        uint256 len = winningBids.length;
+
+        // if winner, refund the difference between self and next lowest bid
+        // everyone but the lowest bidder gets a refund
+        for (uint256 i = 0; i < len - 1; i++) {
+            Bid storage currentBid = winningBids[i];
+            uint256 refundableBal = currentBid.amount - winningBids[i + 1].amount;
+            ownerWithdrawableBal += refundableBal - currentBid.amount;
+
+            currentBid.amount = refundableBal;
+        }
+
+        payable(owner()).transfer(ownerWithdrawableBal);
+        
         emit End();
     }
-
 }
