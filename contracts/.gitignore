@@ -1,0 +1,18 @@
+# Compiler files
+# Compiler files
+cache/
+out/
+
+
+# Dotenv file
+.env
+
+# IDE
+.idea
+
+# Soldeer dependencies
+dependencies/
+
+node_modules/
+broadcast/
+
