@@ -17,3 +17,5 @@ dependencies/
 node_modules/
 broadcast/
 
+
+.env.local
