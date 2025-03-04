@@ -10,7 +10,7 @@ contract SlotAuction is Ownable {
     event NewBid(address indexed sender, uint256 amount);
     event RefundAvailable(address bidder, uint256 amount);
     event Withdraw(address indexed bidder, uint256 amount);
-    event End();
+    event End(uint256 winningBidSum);
 
     struct Bid {
         address bidder; // 20 bytes
@@ -19,6 +19,7 @@ contract SlotAuction is Ownable {
 
     uint40 public immutable BID_DURATION;
     uint256 public immutable SLOTS_AVAILABLE;
+    uint256 public immutable FINAL_SLOT_INDEX;
 
     uint40 public endTime;
     bool public isComplete;
@@ -31,15 +32,19 @@ contract SlotAuction is Ownable {
     mapping(address => Bid) public allBids;
 
     constructor(uint256 slotsAvailable, uint40 bidDuration, uint96 startingBid) Ownable(msg.sender) {
+        require(slotsAvailable > 0, "No slots");
+        require(bidDuration > 0, "No bid duration");
+
         SLOTS_AVAILABLE = slotsAvailable;
+        FINAL_SLOT_INDEX = slotsAvailable - 1;
         BID_DURATION = bidDuration;
         lowestWinningBid = startingBid;
 
-        /// @dev Dynamic array to enforce a "fixed" array length at deployment
+        // Dynamic array to enforce a "fixed" array length at deployment
         for (uint256 i; i < slotsAvailable; ++i) {
             winningBids.push(Bid({
                 bidder: address(0),
-                amount: startingBid
+                amount: startingBid + uint96(i) // Add dust so duplicate bids are created
             }));
         }
     }
@@ -54,7 +59,8 @@ contract SlotAuction is Ownable {
     /**
      * @notice Bid on a slot
      * @notice Value specified will increase previous bid if this is not the first time calling `bid()`
-     * @notice Cannot increase bid if caller is already has a winning bid
+     * @notice Cannot make a bid that duplicates an existing winning bid
+     * @notice Cannot increase bid if caller already has a winning bid
      */
     function bid() external payable {
         uint256 _endTime = endTime; // shadow
@@ -64,10 +70,11 @@ contract SlotAuction is Ownable {
 
         uint256 _lowestWinningBid = lowestWinningBid; // shadow
 
-        // Increase previous bid if user has already bid
+        // User can only have 1 winning bid
         uint96 previousBid = allBids[msg.sender].amount;
         require(previousBid < _lowestWinningBid, "Already winning");
 
+        // Increase previous bid if user has already bid
         uint96 bidAmount = previousBid + uint96(msg.value);
         require(bidAmount > _lowestWinningBid, "Bid too low");
 
@@ -75,29 +82,36 @@ contract SlotAuction is Ownable {
             bidder: msg.sender,
             amount: bidAmount
         });
-        allBids[msg.sender] = newBid;
 
         // Insert new bid while maintaining winning bid descending order
         for (uint256 i; i < SLOTS_AVAILABLE; ++i) {
-            // Iterate winning bids until we find one that is lower than newBid
-            if (winningBids[i].amount < bidAmount) {
+            // Iterate winning bids until we find one that is lower than new bid
+            if (bidAmount > winningBids[i].amount) {
+                // If new bid is NOT in the last slot, ensure it does not match the next descending bid
+                // This maintains a descending sorted list without duplicates
+                require(i == FINAL_SLOT_INDEX || bidAmount != winningBids[i + 1].amount, "Duplicate bid");
 
                 // Shift remaining bids down to make space for newBid
-                for (uint256 j = SLOTS_AVAILABLE - 1; j > i; --j) {
+                for (uint256 j = FINAL_SLOT_INDEX; j > i; --j) {
                     winningBids[j] = winningBids[j - 1];
                 }
 
                 // Add newBid and maintain sorted order
                 winningBids[i] = newBid;
 
-                break;
+                allBids[msg.sender] = newBid;
+
+                // Update the lowest winning bid
+                lowestWinningBid = winningBids[FINAL_SLOT_INDEX].amount;
+
+                emit NewBid(msg.sender, bidAmount);
+
+                return;
             }
         }
 
-        // Update the lowest winning bid
-        lowestWinningBid = winningBids[SLOTS_AVAILABLE].amount;
-
-        emit NewBid(msg.sender, bidAmount);
+        // Should never get here
+        revert("Unknown error");
     }
 
     /**
@@ -110,7 +124,7 @@ contract SlotAuction is Ownable {
 
         Bid storage userBid = allBids[msg.sender];
         uint256 refund = userBid.amount;
-        require(refund > 0, "Zero balance");
+        require(refund > 0, "Zero refund");
 
         userBid.amount = 0;
 
@@ -132,7 +146,7 @@ contract SlotAuction is Ownable {
 
         /// @dev For all winners, refund the difference between self and next lowest bid
         /// @dev The lowest winning bidder will not get a refund
-        for (uint256 i; i < SLOTS_AVAILABLE - 1; ++i) {
+        for (uint256 i; i < FINAL_SLOT_INDEX; ++i) {
             Bid storage winningBid = winningBids[i];
             address _bidder = winningBid.bidder; // shadow
             uint96 _amount = winningBid.amount; // shadow
@@ -147,6 +161,6 @@ contract SlotAuction is Ownable {
 
         payable(owner()).transfer(winningBidAmounts);
 
-        emit End();
+        emit End(winningBidAmounts);
     }
 }
