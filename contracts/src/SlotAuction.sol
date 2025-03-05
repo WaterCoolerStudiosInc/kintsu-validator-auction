@@ -162,4 +162,8 @@ contract SlotAuction is Ownable {
 
         emit End(winningBidAmounts);
     }
+
+    function getWinningBids() external view returns (Bid[] memory) {
+        return winningBids;
+    }
 }
