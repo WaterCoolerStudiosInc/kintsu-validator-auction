@@ -9,6 +9,13 @@ forge soldeer install
 forge build
 ```
 
+### Test Contracts
+```shell
+cd contracts
+forge soldeer install
+forge test
+```
+
 ### Deploy contracts locally
 
 - Open new terminal and run

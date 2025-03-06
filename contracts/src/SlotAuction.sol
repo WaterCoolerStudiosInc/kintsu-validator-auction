@@ -9,7 +9,7 @@ contract SlotAuction is Ownable {
     event NewBid(address indexed sender, uint256 amount);
     event RefundAvailable(address bidder, uint256 amount);
     event Withdraw(address indexed bidder, uint256 amount);
-    event End(uint256 winningBidSum);
+    event End(uint256 proceeds);
 
     struct Bid {
         address bidder; // 20 bytes
@@ -33,25 +33,28 @@ contract SlotAuction is Ownable {
     constructor(uint256 slotsAvailable, uint40 bidDuration, uint96 startingBid) Ownable(msg.sender) {
         require(slotsAvailable > 0, "No slots");
         require(bidDuration > 0, "No bid duration");
+        require(startingBid > 0, "Zero starting bid");
 
         SLOTS_AVAILABLE = slotsAvailable;
         FINAL_SLOT_INDEX = slotsAvailable - 1;
         BID_DURATION = bidDuration;
         lowestWinningBid = startingBid;
 
-        // Dynamic array to enforce a "fixed" array length at deployment
+        /// @dev Dynamic array to enforce a "fixed" array length at deployment
         for (uint256 i; i < slotsAvailable; ++i) {
             winningBids.push(Bid({
                 bidder: address(0),
-                amount: startingBid + uint96(i) // Add dust so duplicate bids are created
+                amount: 0
             }));
         }
     }
 
+    /**
+     * @notice Allows bids to be placed
+     */
     function start() external onlyOwner {
         require(endTime == 0, "Auction already started");
         endTime = uint40(block.timestamp) + BID_DURATION;
-
         emit Start();
     }
 
@@ -86,9 +89,8 @@ contract SlotAuction is Ownable {
         for (uint256 i; i < SLOTS_AVAILABLE; ++i) {
             // Iterate winning bids until we find one that is lower than new bid
             if (bidAmount > winningBids[i].amount) {
-                // If new bid is NOT in the last slot, ensure it does not match the next descending bid
                 // This maintains a descending sorted list without duplicates
-                require(i == FINAL_SLOT_INDEX || bidAmount != winningBids[i + 1].amount, "Duplicate bid");
+                require(i == 0 || bidAmount < winningBids[i - 1].amount, "Duplicate bid");
 
                 // Shift remaining bids down to make space for newBid
                 for (uint256 j = FINAL_SLOT_INDEX; j > i; --j) {
@@ -100,8 +102,11 @@ contract SlotAuction is Ownable {
 
                 allBids[msg.sender] = newBid;
 
-                // Update the lowest winning bid
-                lowestWinningBid = winningBids[FINAL_SLOT_INDEX].amount;
+                /// @dev Only update `lowestWinningBid` when no empty bids remain
+                uint96 newLowestWinningBid = winningBids[FINAL_SLOT_INDEX].amount;
+                if (newLowestWinningBid > 0) {
+                    lowestWinningBid = newLowestWinningBid;
+                }
 
                 emit NewBid(msg.sender, bidAmount);
 
@@ -122,6 +127,7 @@ contract SlotAuction is Ownable {
         require(isComplete, "Auction is not complete");
 
         Bid storage userBid = allBids[msg.sender];
+
         uint256 refund = userBid.amount;
         require(refund > 0, "Zero refund");
 
@@ -132,6 +138,14 @@ contract SlotAuction is Ownable {
         emit Withdraw(msg.sender, refund);
     }
 
+    /**
+     * @notice End the auction and enable partial refunds for winning bids
+     * @notice The lowest winning bid is not eligible for any refund
+     * @notice Non-winning bids will be eligible for a 100% refund
+     * @notice Refunds can be claimed by calling `withdraw()`
+     * @dev Transfers proceeds from all winning bids minus refunds to the owner
+     * @dev Enables `withdraw()` to be called
+     */
     function end() external onlyOwner {
         uint256 _endTime = endTime; // shadow
 
@@ -141,26 +155,48 @@ contract SlotAuction is Ownable {
 
         isComplete = true;
 
-        uint256 winningBidAmounts;
+        uint256 proceeds;
 
-        /// @dev For all winners, refund the difference between self and next lowest bid
+        /// @dev Refund the difference between self and next lowest bid
         /// @dev The lowest winning bidder will not get a refund
-        for (uint256 i; i < FINAL_SLOT_INDEX; ++i) {
-            Bid storage winningBid = winningBids[i];
-            address _bidder = winningBid.bidder; // shadow
-            uint96 _amount = winningBid.amount; // shadow
+        for (uint256 i; i < SLOTS_AVAILABLE; ++i) {
+            Bid memory winningBid = winningBids[i];
 
-            /// @dev safe because `bid()` guarantees `winningBids` is sorted in descending order
-            uint96 refund = _amount - winningBids[i + 1].amount;
-            winningBidAmounts += _amount - refund;
-            winningBid.amount = refund;
+            /// @dev This is the final and lowest winning bid
+            if (i == FINAL_SLOT_INDEX) {
+                // No refund
+                allBids[winningBid.bidder].amount = 0;
+                proceeds += winningBid.amount;
+                break;
+            }
 
-            emit RefundAvailable(_bidder, refund);
+            /// @dev Safe because i < FINAL_SLOT_INDEX
+            Bid memory nextBid = winningBids[i + 1];
+
+            /// @dev Special case where empty bids still remain
+            if (nextBid.bidder == address(0)) {
+                // No refund
+                allBids[winningBid.bidder].amount = 0;
+                proceeds += winningBid.amount;
+                break;
+            }
+
+            /// @dev Cannot underflow because `winningBids` is sorted in descending order
+            uint96 refund = winningBid.amount - nextBid.amount;
+
+            /// @dev Refund the difference between bid and next lowest bid
+            allBids[winningBid.bidder].amount = refund;
+
+            proceeds += winningBid.amount - refund;
+
+            emit RefundAvailable(winningBid.bidder, refund);
         }
 
-        payable(owner()).transfer(winningBidAmounts);
+        if (proceeds > 0) {
+            payable(owner()).transfer(proceeds);
+        }
 
-        emit End(winningBidAmounts);
+        emit End(proceeds);
     }
 
     function getWinningBids() external view returns (Bid[] memory) {
