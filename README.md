@@ -58,28 +58,38 @@ This project implements a novel auction mechanism called a "cascading 2nd price 
 
 #### Example
 
-Imagine an auction with 3 available slots and a minimum bid of 1 ETH:
+Imagine an auction with 4 available slots and a minimum bid of 1 MON:
 
 1. **Initial Bids**:
-   - Eve bids 6 ETH
-   - David bids 4 ETH
-   - Charlie bids 3 ETH
-   - Bob bids 2 ETH
+   - Eve bids 5.5 MON 
+   - David bids 5.2 MON
+   - Charlie bids 5.0 MON
+   - Bob bids 4.8 MON
+   - Alice bids 4.5 MON
+   - Frank bids 3.5 MON
+   - Grace bids 2.5 MON
 
-2. **Final Winning Bids (in descending order)**:
-   - Eve: 6 ETH
-   - David: 4 ETH
-   - Charlie: 3 ETH (lowest winning bid)
-   - Bob: 2 ETH (not a winner)
+2. **Auction Results**:
 
-3. **Actual Payments and Refunds**:
-   - Eve pays 4 ETH (David's bid) and receives a 2 ETH refund
-   - David pays 3 ETH (Charlie's bid) and receives a 1 ETH refund
-   - Charlie pays 3 ETH (full amount, no refund)
-   - Bob receives a full refund of 2 ETH
+| Participant | Original Bid | Final Payment | Refund | Net Cost | Result |
+|-------------|------------:|-------------:|-------:|---------:|--------|
+| Eve         | 5.5 MON     | 5.2 MON      | 0.3 MON| 5.2 MON  | 🥉 3rd place (paid most) |
+| David       | 5.2 MON     | 5.0 MON      | 0.2 MON| 5.0 MON  | 🥈 2nd place (paid middle) |
+| Charlie     | 5.0 MON     | 4.8 MON      | 0.2 MON| 4.8 MON  | 🥇 1st place (tied, with discount) |
+| Bob         | 4.8 MON     | 4.8 MON      | 0 MON  | 4.8 MON  | 🥇 1st place (tied, exact bid) |
+| Alice       | 4.5 MON     | 0 MON        | 4.5 MON| 0 MON    | ❌ Not selected |
+| Frank       | 3.5 MON     | 0 MON        | 3.5 MON| 0 MON    | ❌ Not selected |
+| Grace       | 2.5 MON     | 0 MON        | 2.5 MON| 0 MON    | ❌ Not selected |
+
+3. **Winner Analysis**:
+   - Notice how Charlie and Bob can both be considered winners:
+     - Charlie (5.0 MON bid) paid only 4.8 MON, receiving back a 0.2 MON refund
+     - Bob (4.8 MON bid) paid exactly his bid but still secured a slot at the lowest price
+   - The bidders with higher bids (Eve and David) paid more for the same slots
+   - In this tighter bidding scenario, being the lowest or second-lowest winner is advantageous
 
 4. **Total Proceeds**:
-   - The auction contract collects 4 + 3 + 3 = 10 ETH in proceeds
+   - The auction contract collects 5.2 + 5.0 + 4.8 + 4.8 = 19.8 MON in proceeds
 
 #### Benefits
 
